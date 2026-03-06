@@ -9,7 +9,6 @@ import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.wrappers.BlockPosition;
 import com.comphenix.protocol.wrappers.WrappedBlockData;
 import com.lastbreath.hc.sightculler.SightCullerPlugin;
-import com.lastbreath.hc.sightculler.config.SightCullerConfig;
 import com.lastbreath.hc.sightculler.metrics.MetricsService;
 import com.lastbreath.hc.sightculler.visibility.SectionDirtyTracker;
 import com.lastbreath.hc.sightculler.visibility.VisibilityEngine;
@@ -24,16 +23,14 @@ import java.lang.reflect.Array;
 
 public final class PacketMaskService {
     private final SightCullerPlugin plugin;
-    private final SightCullerConfig config;
     private final VisibilityEngine visibilityEngine;
     private final MetricsService metrics;
     private final SectionDirtyTracker dirtyTracker;
     private final ProtocolManager protocolManager;
     private PacketAdapter adapter;
 
-    public PacketMaskService(SightCullerPlugin plugin, SightCullerConfig config, VisibilityEngine visibilityEngine, MetricsService metrics, SectionDirtyTracker dirtyTracker) {
+    public PacketMaskService(SightCullerPlugin plugin, VisibilityEngine visibilityEngine, MetricsService metrics, SectionDirtyTracker dirtyTracker) {
         this.plugin = plugin;
-        this.config = config;
         this.visibilityEngine = visibilityEngine;
         this.metrics = metrics;
         this.dirtyTracker = dirtyTracker;
@@ -139,7 +136,7 @@ public final class PacketMaskService {
             int chunkX = event.getPacket().getIntegers().read(0);
             int chunkZ = event.getPacket().getIntegers().read(1);
             int minSection = player.getWorld().getMinHeight() >> 4;
-            int maxSection = (player.getWorld().getMaxHeight() >> 4);
+            int maxSection = (player.getWorld().getMaxHeight() - 1) >> 4;
             for (int sectionY = minSection; sectionY <= maxSection; sectionY++) {
                 dirtyTracker.mark(player.getWorld().getBlockAt((chunkX << 4), sectionY << 4, (chunkZ << 4)));
             }
@@ -162,7 +159,7 @@ public final class PacketMaskService {
 
         ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot(true, false, false);
         int minSection = world.getMinHeight() >> 4;
-        int maxSection = (world.getMaxHeight() >> 4);
+        int maxSection = (world.getMaxHeight() - 1) >> 4;
 
         for (int sectionY = minSection; sectionY <= maxSection; sectionY++) {
             int baseY = sectionY << 4;
@@ -175,9 +172,6 @@ public final class PacketMaskService {
                     for (int lz = 0; lz < 16; lz++) {
                         int z = (chunkZ << 4) + lz;
                         Material type = snapshot.getBlockType(lx, y, lz);
-                        if (!config.hiddenMaterials().contains(type)) {
-                            continue;
-                        }
                         if (visibilityEngine.shouldReveal(player, world, x, y, z, type)) {
                             continue;
                         }
