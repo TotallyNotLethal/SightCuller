@@ -15,18 +15,8 @@ import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.BitSet;
-import java.util.EnumSet;
-import java.util.Set;
 
 public final class VisibilityEngine {
-    private static final Set<Material> ALWAYS_HIDDEN_MATERIALS = EnumSet.of(
-            Material.AIR,
-            Material.CAVE_AIR,
-            Material.VOID_AIR,
-            Material.WATER,
-            Material.LAVA
-    );
-
     private final SightCullerPlugin plugin;
     private volatile SightCullerConfig config;
     private final PlayerVisibilityCache cache;
@@ -65,6 +55,7 @@ public final class VisibilityEngine {
     public boolean shouldReveal(Player player, World world, int x, int y, int z, Material originalMaterial) {
         if (!isWorldEnabled(world)) return true;
         if (!shouldMaskMaterial(originalMaterial)) return true;
+        if (movementTracker.isInJoinGracePeriod(player)) return true;
 
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
@@ -124,7 +115,7 @@ public final class VisibilityEngine {
     }
 
     private boolean shouldMaskMaterial(Material material) {
-        return ALWAYS_HIDDEN_MATERIALS.contains(material) || config.hiddenMaterials().contains(material);
+        return config.hiddenMaterials().contains(material);
     }
 
     public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY) {

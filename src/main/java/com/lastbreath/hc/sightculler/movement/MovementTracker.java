@@ -14,8 +14,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class MovementTracker implements Listener {
+    private static final long JOIN_GRACE_PERIOD_MS = 3_000L;
     private volatile SightCullerConfig config;
     private final Map<UUID, TrackedState> tracked = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> joinTimes = new ConcurrentHashMap<>();
 
     public MovementTracker(SightCullerConfig config) {
         this.config = config;
@@ -27,12 +29,16 @@ public final class MovementTracker implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        tracked.put(event.getPlayer().getUniqueId(), TrackedState.from(event.getPlayer().getLocation()));
+        UUID playerId = event.getPlayer().getUniqueId();
+        tracked.put(playerId, TrackedState.from(event.getPlayer().getLocation()));
+        joinTimes.put(playerId, System.currentTimeMillis());
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        tracked.remove(event.getPlayer().getUniqueId());
+        UUID playerId = event.getPlayer().getUniqueId();
+        tracked.remove(playerId);
+        joinTimes.remove(playerId);
     }
 
     @EventHandler
@@ -46,6 +52,14 @@ public final class MovementTracker implements Listener {
 
     public TrackedState get(Player player) {
         return tracked.computeIfAbsent(player.getUniqueId(), id -> TrackedState.from(player.getLocation()));
+    }
+
+    public boolean isInJoinGracePeriod(Player player) {
+        Long joinedAt = joinTimes.get(player.getUniqueId());
+        if (joinedAt == null) {
+            return false;
+        }
+        return System.currentTimeMillis() - joinedAt < JOIN_GRACE_PERIOD_MS;
     }
 
     public record TrackedState(Location location, float yaw, float pitch, int yawBucket, int pitchBucket, boolean recomputeNeeded) {

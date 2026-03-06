@@ -74,8 +74,7 @@ public final class PacketMaskService {
         Material type = data.getType();
         World world = player.getWorld();
         if (!visibilityEngine.shouldReveal(player, world, pos.getX(), pos.getY(), pos.getZ(), type)) {
-            Material mask = visibilityEngine.maskMaterial(world, pos.getY());
-            event.getPacket().getBlockData().write(0, WrappedBlockData.createData(mask));
+            event.getPacket().getBlockData().write(0, WrappedBlockData.createData(Material.AIR));
             metrics.recordMasked();
         } else {
             metrics.recordRevealed();
@@ -107,7 +106,7 @@ public final class PacketMaskService {
                 if (!(wrapped instanceof WrappedBlockData blockData)) continue;
                 Material type = blockData.getType();
                 if (!visibilityEngine.shouldReveal(player, player.getWorld(), x, y, z, type)) {
-                    Array.set(dataArray, i, WrappedBlockData.createData(visibilityEngine.maskMaterial(player.getWorld(), y)));
+                    Array.set(dataArray, i, WrappedBlockData.createData(Material.AIR));
                     metrics.recordMasked();
                 } else {
                     metrics.recordRevealed();
@@ -177,8 +176,7 @@ public final class PacketMaskService {
                             continue;
                         }
 
-                        Material mask = visibilityEngine.maskMaterial(world, y);
-                        updates.put(new Location(world, x, y, z), mask.createBlockData());
+                        updates.put(new Location(world, x, y, z), Material.AIR.createBlockData());
 
                         if (updates.size() >= MAX_MULTI_BLOCK_CHANGES_PER_PACKET) {
                             sendMaskedBatch(player, updates);
