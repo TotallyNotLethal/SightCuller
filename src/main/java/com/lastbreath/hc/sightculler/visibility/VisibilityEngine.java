@@ -7,14 +7,26 @@ import com.lastbreath.hc.sightculler.mask.MaskPaletteResolver;
 import com.lastbreath.hc.sightculler.movement.MovementTracker;
 import com.lastbreath.hc.sightculler.snapshot.ChunkSectionSnapshot;
 import org.bukkit.Chunk;
+import org.bukkit.FluidCollisionMode;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 import java.util.BitSet;
+import java.util.EnumSet;
+import java.util.Set;
 
 public final class VisibilityEngine {
+    private static final Set<Material> ALWAYS_HIDDEN_MATERIALS = EnumSet.of(
+            Material.AIR,
+            Material.CAVE_AIR,
+            Material.VOID_AIR,
+            Material.WATER,
+            Material.LAVA
+    );
+
     private final SightCullerPlugin plugin;
     private volatile SightCullerConfig config;
     private final PlayerVisibilityCache cache;
@@ -52,7 +64,7 @@ public final class VisibilityEngine {
 
     public boolean shouldReveal(Player player, World world, int x, int y, int z, Material originalMaterial) {
         if (!isWorldEnabled(world)) return true;
-        if (!config.hiddenMaterials().contains(originalMaterial)) return true;
+        if (!shouldMaskMaterial(originalMaterial)) return true;
 
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
@@ -64,6 +76,55 @@ public final class VisibilityEngine {
 
     public Material maskMaterial(World world, int y) {
         return maskPaletteResolver.maskFor(world.getEnvironment(), y);
+    }
+
+    public boolean isPointVisible(Player player, World world, int x, int y, int z) {
+        if (!isWorldEnabled(world)) {
+            return true;
+        }
+
+        Vector eye = player.getEyeLocation().toVector();
+        Vector look = player.getLocation().getDirection().normalize();
+        Vector to = new Vector(x + 0.5, y + 0.5, z + 0.5).subtract(eye);
+
+        double distSq = to.lengthSquared();
+        double maxDistSq = config.maxRevealDistance() * config.maxRevealDistance();
+        if (distSq > maxDistSq) {
+            return false;
+        }
+
+        Vector norm = to.clone().normalize();
+        double horizDot = Math.cos(Math.toRadians(config.horizontalFovDegrees() / 2.0));
+        double vertDot = Math.cos(Math.toRadians(config.verticalFovDegrees() / 2.0));
+
+        Vector flatLook = look.clone().setY(0);
+        if (flatLook.lengthSquared() > 0.0001) {
+            flatLook.normalize();
+            Vector flatNorm = norm.clone().setY(0);
+            if (flatNorm.lengthSquared() > 0.0001) {
+                flatNorm.normalize();
+                if (flatLook.dot(flatNorm) < horizDot) {
+                    return false;
+                }
+            }
+        }
+
+        if (look.clone().setX(0).setZ(0).dot(norm.clone().setX(0).setZ(0)) < vertDot) {
+            return false;
+        }
+
+        RayTraceResult hit = world.rayTraceBlocks(
+                player.getEyeLocation(),
+                new Vector(x + 0.5, y + 0.5, z + 0.5).subtract(player.getEyeLocation().toVector()).normalize(),
+                config.maxRevealDistance(),
+                FluidCollisionMode.NEVER,
+                true
+        );
+        return hit == null || hit.getHitBlock() == null;
+    }
+
+    private boolean shouldMaskMaterial(Material material) {
+        return ALWAYS_HIDDEN_MATERIALS.contains(material) || config.hiddenMaterials().contains(material);
     }
 
     public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY) {

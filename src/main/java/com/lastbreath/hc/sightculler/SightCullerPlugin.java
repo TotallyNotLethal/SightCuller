@@ -8,6 +8,7 @@ import com.lastbreath.hc.sightculler.interaction.InteractionGuardListener;
 import com.lastbreath.hc.sightculler.mask.MaskPaletteResolver;
 import com.lastbreath.hc.sightculler.metrics.MetricsService;
 import com.lastbreath.hc.sightculler.movement.MovementTracker;
+import com.lastbreath.hc.sightculler.packet.EntityMaskService;
 import com.lastbreath.hc.sightculler.packet.PacketMaskService;
 import com.lastbreath.hc.sightculler.visibility.ExposureGraphBuilder;
 import com.lastbreath.hc.sightculler.visibility.SectionDirtyTracker;
@@ -24,6 +25,7 @@ public final class SightCullerPlugin extends JavaPlugin {
     private PlayerVisibilityCache playerVisibilityCache;
     private VisibilityEngine visibilityEngine;
     private PacketMaskService packetMaskService;
+    private EntityMaskService entityMaskService;
     private DebugOverlayService debugOverlayService;
 
     @Override
@@ -44,7 +46,8 @@ public final class SightCullerPlugin extends JavaPlugin {
                 new MaskPaletteResolver(cullerConfig)
         );
         this.debugOverlayService = new DebugOverlayService(this, cullerConfig, visibilityEngine, playerVisibilityCache, movementTracker);
-        this.packetMaskService = new PacketMaskService(this, cullerConfig, visibilityEngine, metricsService, sectionDirtyTracker);
+        this.packetMaskService = new PacketMaskService(this, visibilityEngine, metricsService, sectionDirtyTracker);
+        this.entityMaskService = new EntityMaskService(this, visibilityEngine);
 
         Bukkit.getPluginManager().registerEvents(new InteractionGuardListener(cullerConfig, visibilityEngine, metricsService), this);
         Bukkit.getPluginManager().registerEvents(movementTracker, this);
@@ -58,6 +61,7 @@ public final class SightCullerPlugin extends JavaPlugin {
         }
 
         packetMaskService.start();
+        entityMaskService.start();
         debugOverlayService.start();
         metricsService.start();
         getLogger().info("SightCuller enabled.");
@@ -67,6 +71,9 @@ public final class SightCullerPlugin extends JavaPlugin {
     public void onDisable() {
         if (packetMaskService != null) {
             packetMaskService.stop();
+        }
+        if (entityMaskService != null) {
+            entityMaskService.stop();
         }
         if (debugOverlayService != null) {
             debugOverlayService.stop();
