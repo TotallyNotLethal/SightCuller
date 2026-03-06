@@ -1,0 +1,14 @@
+name: SightCuller
+version: 1.0.0
+main: com.lastbreath.hc.sightculler.SightCullerPlugin
+api-version: '1.21'
+author: LastBreath
+depend: [ProtocolLib]
+commands:
+  sightculler:
+    description: SightCuller administration command
+    usage: /sightculler <reload|debug|inspect|stats|revealtest>
+    permission: sightculler.admin
+permissions:
+  sightculler.admin:
+    default: op
