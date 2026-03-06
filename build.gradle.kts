@@ -27,8 +27,3 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(21)
 }
 
-sourceSets {
-    main {
-        resources.srcDir("src/main/resources")
-    }
-}
