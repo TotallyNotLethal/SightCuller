@@ -1,0 +1,50 @@
+enabled: true
+debug: false
+per-world-enabled:
+  world: true
+  world_nether: true
+  world_the_end: true
+horizontal-fov-degrees: 100.0
+vertical-fov-degrees: 70.0
+max-reveal-distance: 56.0
+movement-recompute-threshold: 1.25
+look-recompute-threshold-degrees: 8.0
+recent-visibility-retention-ms: 400
+hide-surface-depth-below-surface-only: 8
+natural-mask-mode: NATURAL_STONE
+line-of-sight-enforcement: true
+alert-on-block-probe: true
+async-precompute: true
+cache:
+  section-snapshot-size: 4096
+  player-visibility-size: 32768
+metrics-interval-ticks: 200
+hidden-materials:
+  - COAL_ORE
+  - DEEPSLATE_COAL_ORE
+  - IRON_ORE
+  - DEEPSLATE_IRON_ORE
+  - COPPER_ORE
+  - DEEPSLATE_COPPER_ORE
+  - GOLD_ORE
+  - DEEPSLATE_GOLD_ORE
+  - REDSTONE_ORE
+  - DEEPSLATE_REDSTONE_ORE
+  - EMERALD_ORE
+  - DEEPSLATE_EMERALD_ORE
+  - LAPIS_ORE
+  - DEEPSLATE_LAPIS_ORE
+  - DIAMOND_ORE
+  - DEEPSLATE_DIAMOND_ORE
+  - NETHER_GOLD_ORE
+  - NETHER_QUARTZ_ORE
+  - ANCIENT_DEBRIS
+  - CHEST
+  - TRAPPED_CHEST
+  - BARREL
+  - SPAWNER
+  - TRIAL_SPAWNER
+  - VAULT
+  - SUSPICIOUS_SAND
+  - SUSPICIOUS_GRAVEL
+  - SHULKER_BOX
