@@ -22,6 +22,7 @@ import org.bukkit.entity.Player;
 import java.lang.reflect.Array;
 
 public final class PacketMaskService {
+    private static final int MAX_MULTI_BLOCK_CHANGES_PER_PACKET = 256;
     private final SightCullerPlugin plugin;
     private final VisibilityEngine visibilityEngine;
     private final MetricsService metrics;
@@ -163,7 +164,7 @@ public final class PacketMaskService {
 
         for (int sectionY = minSection; sectionY <= maxSection; sectionY++) {
             int baseY = sectionY << 4;
-            java.util.Map<Location, BlockData> updates = new java.util.HashMap<>();
+            java.util.Map<Location, BlockData> updates = new java.util.HashMap<>(MAX_MULTI_BLOCK_CHANGES_PER_PACKET);
 
             for (int lx = 0; lx < 16; lx++) {
                 int x = (chunkX << 4) + lx;
@@ -178,16 +179,25 @@ public final class PacketMaskService {
 
                         Material mask = visibilityEngine.maskMaterial(world, y);
                         updates.put(new Location(world, x, y, z), mask.createBlockData());
+
+                        if (updates.size() >= MAX_MULTI_BLOCK_CHANGES_PER_PACKET) {
+                            sendMaskedBatch(player, updates);
+                            updates.clear();
+                        }
                     }
                 }
             }
 
             if (!updates.isEmpty()) {
-                player.sendMultiBlockChange(updates);
-                for (int i = 0; i < updates.size(); i++) {
-                    metrics.recordMasked();
-                }
+                sendMaskedBatch(player, updates);
             }
+        }
+    }
+
+    private void sendMaskedBatch(Player player, java.util.Map<Location, BlockData> updates) {
+        player.sendMultiBlockChange(updates);
+        for (int i = 0; i < updates.size(); i++) {
+            metrics.recordMasked();
         }
     }
 }
