@@ -58,10 +58,17 @@ public final class VisibilityEngine {
     public boolean shouldReveal(Player player, World world, int x, int y, int z, Material originalMaterial) {
         if (!isWorldEnabled(world)) return true;
         if (originalMaterial.isAir()) return true;
-        int topLayerY = world.getHighestBlockYAt(x, z);
-        if (y < topLayerY) return false;
         if (!shouldMaskMaterial(originalMaterial)) return true;
         if (movementTracker.isInJoinGracePeriod(player)) return true;
+
+        int topLayerY = world.getHighestBlockYAt(x, z);
+        boolean belowSurfaceMaskDepth = isWithinBelowSurfaceMaskDepth(y, topLayerY);
+        if (belowSurfaceMaskDepth) {
+            if (config.lineOfSightEnforcement() && isPointVisible(player, world, x, y, z)) {
+                return true;
+            }
+            return false;
+        }
 
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
@@ -78,11 +85,6 @@ public final class VisibilityEngine {
     public boolean isPointVisible(Player player, World world, int x, int y, int z) {
         if (!isWorldEnabled(world)) {
             return true;
-        }
-
-        int topLayerY = world.getHighestBlockYAt(x, z);
-        if (y < topLayerY) {
-            return false;
         }
 
         Location eyeLocation = player.getEyeLocation();
@@ -153,6 +155,19 @@ public final class VisibilityEngine {
         return config.hiddenMaterials().contains(material);
     }
 
+    private boolean isWithinBelowSurfaceMaskDepth(int y, int topLayerY) {
+        if (y >= topLayerY) {
+            return false;
+        }
+
+        int depth = Math.max(0, config.hideSurfaceDepthBelowSurfaceOnly());
+        if (depth == 0) {
+            return false;
+        }
+
+        return y >= topLayerY - depth;
+    }
+
     public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY) {
         MovementTracker.TrackedState state = movementTracker.get(player);
         PlayerVisibilityCache.VisibilityKey key = new PlayerVisibilityCache.VisibilityKey(
@@ -182,6 +197,7 @@ public final class VisibilityEngine {
 
     private BitSet gateByPlayerView(Player player, ChunkSectionSnapshot snapshot, ExposureGraphBuilder.ExposureGraph graph, int[] columnSurfaceY) {
         BitSet revealed = new BitSet(4096);
+        boolean enforceLos = config.lineOfSightEnforcement();
 
         BitSet candidates = graph.candidateSolidCells();
         for (int idx = candidates.nextSetBit(0); idx >= 0; idx = candidates.nextSetBit(idx + 1)) {
@@ -193,14 +209,44 @@ public final class VisibilityEngine {
             int wz = (snapshot.chunkZ() << 4) + lz;
 
             int columnTopY = columnSurfaceY[(lz << 4) | lx];
-            if (wy < columnTopY) {
+            if (isWithinBelowSurfaceMaskDepth(wy, columnTopY)) {
+                if (enforceLos && isPointVisible(player, player.getWorld(), wx, wy, wz)) {
+                    revealed.set(idx);
+                }
                 continue;
             }
 
-            if (isPointVisible(player, player.getWorld(), wx, wy, wz)) {
+            if (!enforceLos || isPointVisible(player, player.getWorld(), wx, wy, wz)) {
                 revealed.set(idx);
             }
         }
+
+        if (enforceLos) {
+            for (int idx = 0; idx < 4096; idx++) {
+                if (revealed.get(idx)) {
+                    continue;
+                }
+                int lx = idx & 15;
+                int lz = (idx >> 4) & 15;
+                int ly = (idx >> 8) & 15;
+                if (snapshot.isAir(lx, ly, lz)) {
+                    continue;
+                }
+
+                int wy = (snapshot.sectionY() << 4) + ly;
+                int columnTopY = columnSurfaceY[(lz << 4) | lx];
+                if (!isWithinBelowSurfaceMaskDepth(wy, columnTopY)) {
+                    continue;
+                }
+
+                int wx = (snapshot.chunkX() << 4) + lx;
+                int wz = (snapshot.chunkZ() << 4) + lz;
+                if (isPointVisible(player, player.getWorld(), wx, wy, wz)) {
+                    revealed.set(idx);
+                }
+            }
+        }
+
         return revealed;
     }
 
