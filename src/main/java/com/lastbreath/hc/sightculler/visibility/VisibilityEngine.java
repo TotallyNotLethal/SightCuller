@@ -8,6 +8,7 @@ import com.lastbreath.hc.sightculler.movement.MovementTracker;
 import com.lastbreath.hc.sightculler.snapshot.ChunkSectionSnapshot;
 import org.bukkit.Chunk;
 import org.bukkit.FluidCollisionMode;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -17,6 +18,8 @@ import org.bukkit.util.Vector;
 import java.util.BitSet;
 
 public final class VisibilityEngine {
+    private static final double RAY_EPSILON = 1.0e-4;
+
     private final SightCullerPlugin plugin;
     private volatile SightCullerConfig config;
     private final PlayerVisibilityCache cache;
@@ -82,17 +85,24 @@ public final class VisibilityEngine {
             return false;
         }
 
-        Vector eye = player.getEyeLocation().toVector();
+        Location eyeLocation = player.getEyeLocation();
+        Vector eye = eyeLocation.toVector();
         Vector look = player.getLocation().getDirection().normalize();
-        Vector to = new Vector(x + 0.5, y + 0.5, z + 0.5).subtract(eye);
+        Vector target = new Vector(x + 0.5, y + 0.5, z + 0.5);
+        Vector toTarget = target.clone().subtract(eye);
 
-        double distSq = to.lengthSquared();
+        double distSq = toTarget.lengthSquared();
         double maxDistSq = config.maxRevealDistance() * config.maxRevealDistance();
         if (distSq > maxDistSq) {
             return false;
         }
 
-        Vector norm = to.clone().normalize();
+        double targetDistance = toTarget.length();
+        if (targetDistance <= RAY_EPSILON) {
+            return true;
+        }
+
+        Vector norm = toTarget.clone().normalize();
         double horizDot = Math.cos(Math.toRadians(config.horizontalFovDegrees() / 2.0));
         double vertDot = Math.cos(Math.toRadians(config.verticalFovDegrees() / 2.0));
 
@@ -113,13 +123,30 @@ public final class VisibilityEngine {
         }
 
         RayTraceResult hit = world.rayTraceBlocks(
-                player.getEyeLocation(),
-                new Vector(x + 0.5, y + 0.5, z + 0.5).subtract(player.getEyeLocation().toVector()).normalize(),
-                config.maxRevealDistance(),
+                eyeLocation,
+                norm,
+                targetDistance + RAY_EPSILON,
                 FluidCollisionMode.NEVER,
                 true
         );
-        return hit == null || hit.getHitBlock() == null;
+
+        if (hit == null || hit.getHitBlock() == null) {
+            return true;
+        }
+
+        if (hit.getHitBlock().getX() == x && hit.getHitBlock().getY() == y && hit.getHitBlock().getZ() == z) {
+            return true;
+        }
+
+        Vector hitPosition = hit.getHitPosition();
+        if (hitPosition != null) {
+            double hitDistance = hitPosition.distance(eye);
+            if (hitDistance + RAY_EPSILON >= targetDistance) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private boolean shouldMaskMaterial(Material material) {
