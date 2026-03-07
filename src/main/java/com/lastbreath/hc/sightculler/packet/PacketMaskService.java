@@ -12,17 +12,23 @@ import com.lastbreath.hc.sightculler.SightCullerPlugin;
 import com.lastbreath.hc.sightculler.metrics.MetricsService;
 import com.lastbreath.hc.sightculler.visibility.SectionDirtyTracker;
 import com.lastbreath.hc.sightculler.visibility.VisibilityEngine;
+import org.bukkit.ChunkSnapshot;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
-import org.bukkit.ChunkSnapshot;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Array;
+import java.util.BitSet;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class PacketMaskService {
     private static final int MAX_MULTI_BLOCK_CHANGES_PER_PACKET = 256;
+    private static final int INITIAL_MASK_SECTIONS_PER_TICK = 2;
+    private static final int INITIAL_MASK_UPDATES_PER_TICK = 1024;
+
     private final SightCullerPlugin plugin;
     private final VisibilityEngine visibilityEngine;
     private final MetricsService metrics;
@@ -54,7 +60,8 @@ public final class PacketMaskService {
                     case "MULTI_BLOCK_CHANGE" -> handleMultiBlockChange(event, player);
                     case "TILE_ENTITY_DATA" -> handleTileEntity(event, player);
                     case "MAP_CHUNK" -> handleMapChunk(event, player);
-                    default -> { }
+                    default -> {
+                    }
                 }
             }
         };
@@ -141,61 +148,185 @@ public final class PacketMaskService {
                 dirtyTracker.mark(player.getWorld().getBlockAt((chunkX << 4), sectionY << 4, (chunkZ << 4)));
             }
 
-            plugin.getServer().getScheduler().runTask(plugin, () -> applyInitialChunkMask(player, chunkX, chunkZ));
+            plugin.getServer().getScheduler().runTask(plugin, new InitialChunkMaskTask(player, chunkX, chunkZ));
         } catch (Exception ignored) {
             metrics.recordPacketFallback();
         }
     }
 
-    private void applyInitialChunkMask(Player player, int chunkX, int chunkZ) {
-        if (!player.isOnline() || !visibilityEngine.isWorldEnabled(player.getWorld())) {
-            return;
+    private final class InitialChunkMaskTask implements Runnable {
+        private final Player player;
+        private final int chunkX;
+        private final int chunkZ;
+        private final long startedAtNanos;
+        private int sectionY;
+        private int maxSection;
+        private boolean initialized;
+        private ChunkSnapshot snapshot;
+        private World world;
+        private int[] columnTopY;
+        private int sentUpdates;
+
+        private InitialChunkMaskTask(Player player, int chunkX, int chunkZ) {
+            this.player = player;
+            this.chunkX = chunkX;
+            this.chunkZ = chunkZ;
+            this.startedAtNanos = System.nanoTime();
         }
 
-        World world = player.getWorld();
-        if (!world.isChunkLoaded(chunkX, chunkZ)) {
-            return;
+        @Override
+        public void run() {
+            if (!initializeIfNeeded()) {
+                return;
+            }
+
+            int sectionsProcessed = 0;
+            int updatesProcessed = 0;
+            while (sectionY <= maxSection && sectionsProcessed < INITIAL_MASK_SECTIONS_PER_TICK && updatesProcessed < INITIAL_MASK_UPDATES_PER_TICK) {
+                int sectionUpdateCount = processSection(sectionY);
+                updatesProcessed += sectionUpdateCount;
+                sectionsProcessed++;
+                sectionY++;
+            }
+
+            if (sectionY <= maxSection) {
+                plugin.getServer().getScheduler().runTaskLater(plugin, this, 1L);
+                return;
+            }
+
+            metrics.recordInitialChunkMask(System.nanoTime() - startedAtNanos, sentUpdates);
         }
 
-        ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot(true, false, false);
-        int minSection = world.getMinHeight() >> 4;
-        int maxSection = (world.getMaxHeight() - 1) >> 4;
+        private boolean initializeIfNeeded() {
+            if (initialized) {
+                return true;
+            }
+            if (!player.isOnline() || !visibilityEngine.isWorldEnabled(player.getWorld())) {
+                return false;
+            }
 
-        for (int sectionY = minSection; sectionY <= maxSection; sectionY++) {
+            world = player.getWorld();
+            if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                return false;
+            }
+
+            snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot(true, false, false);
+            sectionY = world.getMinHeight() >> 4;
+            maxSection = (world.getMaxHeight() - 1) >> 4;
+            columnTopY = visibilityEngine.computeTopLayerByColumn(world, chunkX, chunkZ);
+            initialized = true;
+            return true;
+        }
+
+        private int processSection(int sectionY) {
+            if (!sectionContainsHiddenMaterial(sectionY)) {
+                return 0;
+            }
+
+            BitSet revealedSolidCells = visibilityEngine.compute(player, world, chunkX, chunkZ, sectionY, columnTopY).revealedSolidCells();
+            int baseX = chunkX << 4;
             int baseY = sectionY << 4;
-            java.util.Map<Location, BlockData> updates = new java.util.HashMap<>(MAX_MULTI_BLOCK_CHANGES_PER_PACKET);
+            int baseZ = chunkZ << 4;
+            PackedPositionBuffer maskedPositions = new PackedPositionBuffer(MAX_MULTI_BLOCK_CHANGES_PER_PACKET);
+            int maskedInSection = 0;
 
-            for (int lx = 0; lx < 16; lx++) {
-                int x = (chunkX << 4) + lx;
-                for (int ly = 0; ly < 16; ly++) {
-                    int y = baseY + ly;
-                    for (int lz = 0; lz < 16; lz++) {
-                        int z = (chunkZ << 4) + lz;
+            for (int ly = 0; ly < 16; ly++) {
+                int y = baseY + ly;
+                for (int lz = 0; lz < 16; lz++) {
+                    int z = baseZ + lz;
+                    for (int lx = 0; lx < 16; lx++) {
                         Material type = snapshot.getBlockType(lx, y, lz);
-                        if (visibilityEngine.shouldReveal(player, world, x, y, z, type)) {
+                        if (!visibilityEngine.shouldMaskMaterialType(type)) {
                             continue;
                         }
 
-                        updates.put(new Location(world, x, y, z), Material.AIR.createBlockData());
+                        int localIndex = (ly << 8) | (lz << 4) | lx;
+                        if (revealedSolidCells.get(localIndex)) {
+                            continue;
+                        }
 
-                        if (updates.size() >= MAX_MULTI_BLOCK_CHANGES_PER_PACKET) {
-                            sendMaskedBatch(player, updates);
-                            updates.clear();
+                        maskedPositions.add(lx, ly, lz);
+                        maskedInSection++;
+
+                        if (maskedPositions.size() >= MAX_MULTI_BLOCK_CHANGES_PER_PACKET) {
+                            sendMaskedBatch(player, world, baseX, baseY, baseZ, maskedPositions);
+                            sentUpdates += maskedPositions.size();
+                            maskedPositions.clear();
                         }
                     }
                 }
             }
 
-            if (!updates.isEmpty()) {
-                sendMaskedBatch(player, updates);
+            if (!maskedPositions.isEmpty()) {
+                sendMaskedBatch(player, world, baseX, baseY, baseZ, maskedPositions);
+                sentUpdates += maskedPositions.size();
             }
+            return maskedInSection;
+        }
+
+        private boolean sectionContainsHiddenMaterial(int sectionY) {
+            int baseY = sectionY << 4;
+            for (int ly = 0; ly < 16; ly++) {
+                int y = baseY + ly;
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        if (visibilityEngine.shouldMaskMaterialType(snapshot.getBlockType(lx, y, lz))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
     }
 
-    private void sendMaskedBatch(Player player, java.util.Map<Location, BlockData> updates) {
+    private void sendMaskedBatch(Player player, World world, int baseX, int baseY, int baseZ, PackedPositionBuffer packedPositions) {
+        Map<Location, BlockData> updates = new HashMap<>(packedPositions.size());
+        for (int i = 0; i < packedPositions.size(); i++) {
+            int packed = packedPositions.get(i);
+            int lx = packed & 15;
+            int ly = (packed >> 8) & 15;
+            int lz = (packed >> 4) & 15;
+            updates.put(new Location(world, baseX + lx, baseY + ly, baseZ + lz), Material.AIR.createBlockData());
+        }
+
         player.sendMultiBlockChange(updates);
         for (int i = 0; i < updates.size(); i++) {
             metrics.recordMasked();
+        }
+    }
+
+    private static final class PackedPositionBuffer {
+        private int[] elements;
+        private int size;
+
+        private PackedPositionBuffer(int initialCapacity) {
+            this.elements = new int[Math.max(16, initialCapacity)];
+        }
+
+        private void add(int lx, int ly, int lz) {
+            if (size >= elements.length) {
+                int[] expanded = new int[elements.length << 1];
+                System.arraycopy(elements, 0, expanded, 0, elements.length);
+                elements = expanded;
+            }
+            elements[size++] = (ly << 8) | (lz << 4) | lx;
+        }
+
+        private int get(int idx) {
+            return elements[idx];
+        }
+
+        private int size() {
+            return size;
+        }
+
+        private boolean isEmpty() {
+            return size == 0;
+        }
+
+        private void clear() {
+            size = 0;
         }
     }
 }
