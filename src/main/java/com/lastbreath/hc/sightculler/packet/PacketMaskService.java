@@ -181,6 +181,7 @@ public final class PacketMaskService {
         private World world;
         private int[] columnTopY;
         private int sentUpdates;
+        private Set<MaskedBlockKey> trackedMasked;
 
         private InitialChunkMaskTask(Player player, int chunkX, int chunkZ) {
             this.player = player;
@@ -229,6 +230,7 @@ public final class PacketMaskService {
             sectionY = world.getMinHeight() >> 4;
             maxSection = (world.getMaxHeight() - 1) >> 4;
             columnTopY = visibilityEngine.computeTopLayerByColumn(world, chunkX, chunkZ);
+            trackedMasked = playerMaskedBlocks.computeIfAbsent(player.getUniqueId(), ignored -> new HashSet<>());
             initialized = true;
             return true;
         }
@@ -261,6 +263,7 @@ public final class PacketMaskService {
                         }
 
                         maskedPositions.add(lx, ly, lz);
+                        trackedMasked.add(new MaskedBlockKey(world.getUID(), baseX + lx, y, z));
                         maskedInSection++;
 
                         if (maskedPositions.size() >= MAX_MULTI_BLOCK_CHANGES_PER_PACKET) {
