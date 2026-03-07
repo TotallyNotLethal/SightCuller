@@ -54,6 +54,9 @@ public final class VisibilityEngine {
 
     public boolean shouldReveal(Player player, World world, int x, int y, int z, Material originalMaterial) {
         if (!isWorldEnabled(world)) return true;
+        if (originalMaterial.isAir()) return true;
+        int topLayerY = world.getHighestBlockYAt(x, z);
+        if (y < topLayerY) return false;
         if (!shouldMaskMaterial(originalMaterial)) return true;
         if (movementTracker.isInJoinGracePeriod(player)) return true;
 
@@ -72,6 +75,11 @@ public final class VisibilityEngine {
     public boolean isPointVisible(Player player, World world, int x, int y, int z) {
         if (!isWorldEnabled(world)) {
             return true;
+        }
+
+        int topLayerY = world.getHighestBlockYAt(x, z);
+        if (y < topLayerY) {
+            return false;
         }
 
         Vector eye = player.getEyeLocation().toVector();
@@ -137,21 +145,16 @@ public final class VisibilityEngine {
                 world.getName(), chunkX, chunkZ, sectionY, chunk.getChunkSnapshot(true, false, false)
         );
 
-        ExposureGraphBuilder.ExposureGraph graph = exposureGraphBuilder.compute(snapshot, world.getHighestBlockYAt((chunkX << 4) + 8, (chunkZ << 4) + 8));
-        BitSet revealed = gateByPlayerCone(player, snapshot, graph);
+        int[] columnSurfaceY = computeTopLayerByColumn(world, chunkX, chunkZ);
+        ExposureGraphBuilder.ExposureGraph graph = exposureGraphBuilder.compute(snapshot, columnSurfaceY);
+        BitSet revealed = gateByPlayerView(player, snapshot, graph, columnSurfaceY);
         PlayerVisibilityCache.VisibilityValue value = new PlayerVisibilityCache.VisibilityValue(revealed, graph.exposedAirCells(), System.currentTimeMillis(), "computed");
         cache.put(key, value);
         return value;
     }
 
-    private BitSet gateByPlayerCone(Player player, ChunkSectionSnapshot snapshot, ExposureGraphBuilder.ExposureGraph graph) {
+    private BitSet gateByPlayerView(Player player, ChunkSectionSnapshot snapshot, ExposureGraphBuilder.ExposureGraph graph, int[] columnSurfaceY) {
         BitSet revealed = new BitSet(4096);
-        Vector eye = player.getEyeLocation().toVector();
-        Vector look = player.getLocation().getDirection().normalize();
-
-        double maxDistSq = config.maxRevealDistance() * config.maxRevealDistance();
-        double horizDot = Math.cos(Math.toRadians(config.horizontalFovDegrees() / 2.0));
-        double vertDot = Math.cos(Math.toRadians(config.verticalFovDegrees() / 2.0));
 
         BitSet candidates = graph.candidateSolidCells();
         for (int idx = candidates.nextSetBit(0); idx >= 0; idx = candidates.nextSetBit(idx + 1)) {
@@ -162,21 +165,30 @@ public final class VisibilityEngine {
             int wy = (snapshot.sectionY() << 4) + ly;
             int wz = (snapshot.chunkZ() << 4) + lz;
 
-            Vector to = new Vector(wx + 0.5, wy + 0.5, wz + 0.5).subtract(eye);
-            double distSq = to.lengthSquared();
-            if (distSq > maxDistSq) continue;
-
-            Vector norm = to.clone().normalize();
-            Vector flatLook = look.clone().setY(0).normalize();
-            Vector flatNorm = norm.clone().setY(0);
-            if (flatNorm.lengthSquared() > 0.0001) {
-                flatNorm.normalize();
-                if (flatLook.dot(flatNorm) < horizDot) continue;
+            int columnTopY = columnSurfaceY[(lz << 4) | lx];
+            if (wy < columnTopY) {
+                continue;
             }
-            if (look.clone().setX(0).setZ(0).dot(norm.clone().setX(0).setZ(0)) < vertDot) continue;
-            revealed.set(idx);
+
+            if (isPointVisible(player, player.getWorld(), wx, wy, wz)) {
+                revealed.set(idx);
+            }
         }
         return revealed;
+    }
+
+    private int[] computeTopLayerByColumn(World world, int chunkX, int chunkZ) {
+        int[] columnSurfaceY = new int[256];
+        int minY = world.getMinHeight();
+        for (int lz = 0; lz < 16; lz++) {
+            int z = (chunkZ << 4) + lz;
+            for (int lx = 0; lx < 16; lx++) {
+                int x = (chunkX << 4) + lx;
+                int highestY = world.getHighestBlockYAt(x, z);
+                columnSurfaceY[(lz << 4) | lx] = Math.max(minY, highestY);
+            }
+        }
+        return columnSurfaceY;
     }
 
     public String inspect(Player player) {

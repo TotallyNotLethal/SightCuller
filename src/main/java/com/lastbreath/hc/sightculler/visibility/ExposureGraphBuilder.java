@@ -9,7 +9,7 @@ import java.util.Queue;
 public final class ExposureGraphBuilder {
     private static final int[][] NEIGHBORS = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
 
-    public ExposureGraph compute(ChunkSectionSnapshot section, int worldSurfaceY) {
+    public ExposureGraph compute(ChunkSectionSnapshot section, int[] columnSurfaceY) {
         BitSet exposedAir = new BitSet(4096);
         Queue<Integer> bfs = new ArrayDeque<>();
 
@@ -62,7 +62,9 @@ public final class ExposureGraphBuilder {
                             break;
                         }
                     }
-                    if (adjacentToExposed || globalY >= worldSurfaceY - 2) {
+                    int columnTopY = columnSurfaceY[(z << 4) | x];
+                    boolean atOrAboveTopLayer = globalY >= columnTopY;
+                    if (adjacentToExposed || atOrAboveTopLayer) {
                         candidateSolid.set(idx);
                     }
                 }
