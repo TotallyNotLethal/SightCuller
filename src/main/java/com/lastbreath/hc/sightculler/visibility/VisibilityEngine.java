@@ -78,6 +78,10 @@ public final class VisibilityEngine {
         return value.revealedSolidCells().get(local);
     }
 
+    public boolean shouldMaskMaterialType(Material material) {
+        return shouldMaskMaterial(material);
+    }
+
     public Material maskMaterial(World world, int y) {
         return maskPaletteResolver.maskFor(world.getEnvironment(), y);
     }
@@ -169,6 +173,11 @@ public final class VisibilityEngine {
     }
 
     public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY) {
+        int[] columnSurfaceY = computeTopLayerByColumn(world, chunkX, chunkZ);
+        return compute(player, world, chunkX, chunkZ, sectionY, columnSurfaceY);
+    }
+
+    public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY, int[] columnSurfaceY) {
         MovementTracker.TrackedState state = movementTracker.get(player);
         PlayerVisibilityCache.VisibilityKey key = new PlayerVisibilityCache.VisibilityKey(
                 player.getUniqueId(), world.getName(), chunkX, chunkZ, sectionY, state.yawBucket(), state.pitchBucket()
@@ -187,7 +196,6 @@ public final class VisibilityEngine {
                 world.getName(), chunkX, chunkZ, sectionY, chunk.getChunkSnapshot(true, false, false)
         );
 
-        int[] columnSurfaceY = computeTopLayerByColumn(world, chunkX, chunkZ);
         ExposureGraphBuilder.ExposureGraph graph = exposureGraphBuilder.compute(snapshot, columnSurfaceY);
         BitSet revealed = gateByPlayerView(player, snapshot, graph, columnSurfaceY);
         PlayerVisibilityCache.VisibilityValue value = new PlayerVisibilityCache.VisibilityValue(revealed, graph.exposedAirCells(), System.currentTimeMillis(), "computed");
@@ -250,7 +258,7 @@ public final class VisibilityEngine {
         return revealed;
     }
 
-    private int[] computeTopLayerByColumn(World world, int chunkX, int chunkZ) {
+    public int[] computeTopLayerByColumn(World world, int chunkX, int chunkZ) {
         int[] columnSurfaceY = new int[256];
         int minY = world.getMinHeight();
         for (int lz = 0; lz < 16; lz++) {
