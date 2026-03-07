@@ -78,6 +78,10 @@ public final class VisibilityEngine {
         return value.revealedSolidCells().get(local);
     }
 
+    public double maxRevealDistance() {
+        return config.maxRevealDistance();
+    }
+
     public boolean shouldMaskMaterialType(Material material) {
         return shouldMaskMaterial(material);
     }
@@ -160,16 +164,7 @@ public final class VisibilityEngine {
     }
 
     private boolean isWithinBelowSurfaceMaskDepth(int y, int topLayerY) {
-        if (y >= topLayerY) {
-            return false;
-        }
-
-        int depth = Math.max(0, config.hideSurfaceDepthBelowSurfaceOnly());
-        if (depth == 0) {
-            return false;
-        }
-
-        return y >= topLayerY - depth;
+        return y < topLayerY;
     }
 
     public PlayerVisibilityCache.VisibilityValue compute(Player player, World world, int chunkX, int chunkZ, int sectionY) {
