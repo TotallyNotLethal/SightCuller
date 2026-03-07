@@ -60,6 +60,7 @@ public final class VisibilityEngine {
         if (originalMaterial.isAir()) return true;
         if (!shouldMaskMaterial(originalMaterial)) return true;
         if (movementTracker.isInJoinGracePeriod(player)) return true;
+        if (!movementTracker.hasServerView(player)) return true;
 
         int topLayerY = world.getHighestBlockYAt(x, z);
         boolean belowSurfaceMaskDepth = isWithinBelowSurfaceMaskDepth(y, topLayerY);
@@ -94,69 +95,10 @@ public final class VisibilityEngine {
         if (!isWorldEnabled(world)) {
             return true;
         }
-
-        Location eyeLocation = player.getEyeLocation();
-        Vector eye = eyeLocation.toVector();
-        Vector look = player.getLocation().getDirection().normalize();
-        Vector target = new Vector(x + 0.5, y + 0.5, z + 0.5);
-        Vector toTarget = target.clone().subtract(eye);
-
-        double distSq = toTarget.lengthSquared();
-        double maxDistSq = config.maxRevealDistance() * config.maxRevealDistance();
-        if (distSq > maxDistSq) {
-            return false;
-        }
-
-        double targetDistance = toTarget.length();
-        if (targetDistance <= RAY_EPSILON) {
+        if (!movementTracker.hasServerView(player)) {
             return true;
         }
-
-        Vector norm = toTarget.clone().normalize();
-        double horizDot = Math.cos(Math.toRadians(config.horizontalFovDegrees() / 2.0));
-        double vertDot = Math.cos(Math.toRadians(config.verticalFovDegrees() / 2.0));
-
-        Vector flatLook = look.clone().setY(0);
-        if (flatLook.lengthSquared() > 0.0001) {
-            flatLook.normalize();
-            Vector flatNorm = norm.clone().setY(0);
-            if (flatNorm.lengthSquared() > 0.0001) {
-                flatNorm.normalize();
-                if (flatLook.dot(flatNorm) < horizDot) {
-                    return false;
-                }
-            }
-        }
-
-        if (look.clone().setX(0).setZ(0).dot(norm.clone().setX(0).setZ(0)) < vertDot) {
-            return false;
-        }
-
-        RayTraceResult hit = world.rayTraceBlocks(
-                eyeLocation,
-                norm,
-                targetDistance + RAY_EPSILON,
-                FluidCollisionMode.NEVER,
-                true
-        );
-
-        if (hit == null || hit.getHitBlock() == null) {
-            return true;
-        }
-
-        if (hit.getHitBlock().getX() == x && hit.getHitBlock().getY() == y && hit.getHitBlock().getZ() == z) {
-            return true;
-        }
-
-        Vector hitPosition = hit.getHitPosition();
-        if (hitPosition != null) {
-            double hitDistance = hitPosition.distance(eye);
-            if (hitDistance + RAY_EPSILON >= targetDistance) {
-                return true;
-            }
-        }
-
-        return false;
+        return isPointWithinServerFov(player, x, y, z) && isPointWithinServerRaycast(player, world, x, y, z);
     }
 
     private boolean shouldMaskMaterial(Material material) {
@@ -202,6 +144,11 @@ public final class VisibilityEngine {
         BitSet revealed = new BitSet(4096);
         boolean enforceLos = config.lineOfSightEnforcement();
 
+        if (!movementTracker.hasServerView(player)) {
+            revealed.or(graph.candidateSolidCells());
+            return revealed;
+        }
+
         BitSet candidates = graph.candidateSolidCells();
         for (int idx = candidates.nextSetBit(0); idx >= 0; idx = candidates.nextSetBit(idx + 1)) {
             int lx = idx & 15;
@@ -210,6 +157,10 @@ public final class VisibilityEngine {
             int wx = (snapshot.chunkX() << 4) + lx;
             int wy = (snapshot.sectionY() << 4) + ly;
             int wz = (snapshot.chunkZ() << 4) + lz;
+
+            if (!isWithinPlayerServerView(player, player.getWorld(), wx, wy, wz)) {
+                continue;
+            }
 
             int columnTopY = columnSurfaceY[(lz << 4) | lx];
             if (isWithinBelowSurfaceMaskDepth(wy, columnTopY)) {
@@ -244,6 +195,9 @@ public final class VisibilityEngine {
 
                 int wx = (snapshot.chunkX() << 4) + lx;
                 int wz = (snapshot.chunkZ() << 4) + lz;
+                if (!isWithinPlayerServerView(player, player.getWorld(), wx, wy, wz)) {
+                    continue;
+                }
                 if (isPointVisible(player, player.getWorld(), wx, wy, wz)) {
                     revealed.set(idx);
                 }
@@ -251,6 +205,83 @@ public final class VisibilityEngine {
         }
 
         return revealed;
+    }
+
+    public boolean isWithinPlayerServerView(Player player, World world, int x, int y, int z) {
+        return isPointWithinServerFov(player, x, y, z) && isPointWithinServerRaycast(player, world, x, y, z);
+    }
+
+    private boolean isPointWithinServerFov(Player player, int x, int y, int z) {
+        Location eyeLocation = player.getEyeLocation();
+        Vector eye = eyeLocation.toVector();
+        Vector look = eyeLocation.getDirection();
+        if (look.lengthSquared() <= 0.0001) {
+            return false;
+        }
+        look.normalize();
+
+        Vector target = new Vector(x + 0.5, y + 0.5, z + 0.5);
+        Vector toTarget = target.clone().subtract(eye);
+        double targetDistance = toTarget.length();
+        if (targetDistance <= RAY_EPSILON) {
+            return true;
+        }
+
+        Vector norm = toTarget.clone().normalize();
+        double horizDot = Math.cos(Math.toRadians(config.horizontalFovDegrees() / 2.0));
+        double vertDot = Math.cos(Math.toRadians(config.verticalFovDegrees() / 2.0));
+
+        Vector flatLook = look.clone().setY(0);
+        if (flatLook.lengthSquared() > 0.0001) {
+            flatLook.normalize();
+            Vector flatNorm = norm.clone().setY(0);
+            if (flatNorm.lengthSquared() > 0.0001) {
+                flatNorm.normalize();
+                if (flatLook.dot(flatNorm) < horizDot) {
+                    return false;
+                }
+            }
+        }
+
+        return look.clone().setX(0).setZ(0).dot(norm.clone().setX(0).setZ(0)) >= vertDot;
+    }
+
+    private boolean isPointWithinServerRaycast(Player player, World world, int x, int y, int z) {
+        Location eyeLocation = player.getEyeLocation();
+        Vector eye = eyeLocation.toVector();
+        Vector target = new Vector(x + 0.5, y + 0.5, z + 0.5);
+        Vector toTarget = target.clone().subtract(eye);
+
+        double distSq = toTarget.lengthSquared();
+        double maxDistSq = config.maxRevealDistance() * config.maxRevealDistance();
+        if (distSq > maxDistSq) {
+            return false;
+        }
+
+        double targetDistance = toTarget.length();
+        if (targetDistance <= RAY_EPSILON) {
+            return true;
+        }
+
+        Vector norm = toTarget.clone().normalize();
+        RayTraceResult hit = world.rayTraceBlocks(
+                eyeLocation,
+                norm,
+                targetDistance + RAY_EPSILON,
+                FluidCollisionMode.NEVER,
+                true
+        );
+
+        if (hit == null || hit.getHitBlock() == null) {
+            return true;
+        }
+
+        if (hit.getHitBlock().getX() == x && hit.getHitBlock().getY() == y && hit.getHitBlock().getZ() == z) {
+            return true;
+        }
+
+        Vector hitPosition = hit.getHitPosition();
+        return hitPosition != null && hitPosition.distance(eye) + RAY_EPSILON >= targetDistance;
     }
 
     public int[] computeTopLayerByColumn(World world, int chunkX, int chunkZ) {

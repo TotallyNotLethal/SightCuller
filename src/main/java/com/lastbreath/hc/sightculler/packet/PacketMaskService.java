@@ -369,13 +369,17 @@ public final class PacketMaskService {
 
                                 int worldX = (chunkX << 4) + lx;
                                 int worldZ = (chunkZ << 4) + lz;
+                                if (!visibilityEngine.isWithinPlayerServerView(player, world, worldX, y, worldZ)) {
+                                    continue;
+                                }
+
                                 int topY = columnTopY[(lz << 4) | lx];
                                 if (y >= topY) {
                                     continue;
                                 }
 
                                 int localIndex = (ly << 8) | (lz << 4) | lx;
-                                boolean inView = revealed.get(localIndex) && visibilityEngine.isPointVisible(player, world, worldX, y, worldZ);
+                                boolean inView = revealed.get(localIndex);
                                 MaskedBlockKey key = new MaskedBlockKey(world.getUID(), worldX, y, worldZ);
 
                                 if (inView) {

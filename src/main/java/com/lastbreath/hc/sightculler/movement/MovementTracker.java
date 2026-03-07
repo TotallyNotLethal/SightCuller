@@ -54,6 +54,10 @@ public final class MovementTracker implements Listener {
         return tracked.computeIfAbsent(player.getUniqueId(), id -> TrackedState.from(player.getLocation()));
     }
 
+    public boolean hasServerView(Player player) {
+        return get(player).serverViewReady();
+    }
+
     public boolean isInJoinGracePeriod(Player player) {
         Long joinedAt = joinTimes.get(player.getUniqueId());
         if (joinedAt == null) {
@@ -62,9 +66,9 @@ public final class MovementTracker implements Listener {
         return System.currentTimeMillis() - joinedAt < JOIN_GRACE_PERIOD_MS;
     }
 
-    public record TrackedState(Location location, float yaw, float pitch, int yawBucket, int pitchBucket, boolean recomputeNeeded) {
+    public record TrackedState(Location location, float yaw, float pitch, int yawBucket, int pitchBucket, boolean recomputeNeeded, boolean serverViewReady) {
         static TrackedState from(Location loc) {
-            return new TrackedState(loc.clone(), loc.getYaw(), loc.getPitch(), bucketYaw(loc.getYaw()), bucketPitch(loc.getPitch()), true);
+            return new TrackedState(loc.clone(), loc.getYaw(), loc.getPitch(), bucketYaw(loc.getYaw()), bucketPitch(loc.getPitch()), true, false);
         }
 
         TrackedState update(Player player, Location now, SightCullerConfig cfg) {
@@ -75,7 +79,7 @@ public final class MovementTracker implements Listener {
             boolean lookChanged = Math.abs(deltaAngle(yaw, yawNow)) >= cfg.lookRecomputeThresholdDegrees()
                     || Math.abs(pitch - pitchNow) >= cfg.lookRecomputeThresholdDegrees();
             boolean recompute = moved >= thresholdSq || lookChanged;
-            return new TrackedState(now.clone(), yawNow, pitchNow, bucketYaw(yawNow), bucketPitch(pitchNow), recompute);
+            return new TrackedState(now.clone(), yawNow, pitchNow, bucketYaw(yawNow), bucketPitch(pitchNow), recompute, true);
         }
 
         private static float deltaAngle(float a, float b) {
